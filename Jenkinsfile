@@ -1,10 +1,6 @@
 pipeline {
     agent any
 
-    environment {
-        NPM_CONFIG_CACHE = "${WORKSPACE}/.npm"
-    }
-
     stages {
 
         stage('Build') {
@@ -17,6 +13,8 @@ pipeline {
 
             steps {
                 sh '''
+                    export NPM_CONFIG_CACHE=$WORKSPACE/.npm
+
                     rm -rf node_modules
 
                     npm ci
@@ -43,14 +41,18 @@ pipeline {
                         unstash 'node-modules'
 
                         sh '''
+                            export NPM_CONFIG_CACHE=$WORKSPACE/.npm
+
                             npm test -- --watchAll=false
                         '''
                     }
 
                     post {
                         always {
-                            junit allowEmptyResults: true,
-                                  testResults: 'jest-results/junit.xml'
+                            junit(
+                                allowEmptyResults: true,
+                                testResults: 'jest-results/junit.xml'
+                            )
                         }
                     }
                 }
@@ -68,6 +70,8 @@ pipeline {
                         unstash 'node-modules'
 
                         sh '''
+                            export NPM_CONFIG_CACHE=$WORKSPACE/.npm
+
                             npm install serve
 
                             npx serve -s build -l 3000 &
@@ -77,7 +81,7 @@ pipeline {
 
                             npx playwright test --reporter=html
 
-                            kill $SERVER_PID
+                            kill $SERVER_PID || true
                         '''
                     }
 
@@ -109,12 +113,18 @@ pipeline {
                 unstash 'build-artifacts'
 
                 sh '''
-                    npm install netlify-cli
+                    export NPM_CONFIG_CACHE=$WORKSPACE/.npm
 
-                    netlify --version
+                    mkdir -p $NPM_CONFIG_CACHE
 
-                    # Example deployment command
-                    # netlify deploy --prod --dir=build
+                    npx netlify-cli --version
+
+                    # Example deployment:
+                    # npx netlify-cli deploy \
+                    #   --dir=build \
+                    #   --prod \
+                    #   --auth=$NETLIFY_AUTH_TOKEN \
+                    #   --site=$NETLIFY_SITE_ID
                 '''
             }
         }
