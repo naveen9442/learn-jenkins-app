@@ -1,91 +1,136 @@
 pipeline {
     agent any
+
+    environment {
+        NPM_CONFIG_CACHE = "${WORKSPACE}/.npm"
+    }
+
     stages {
+
         stage('Build') {
             agent {
                 docker {
                     image 'node:18-alpine'
                     reuseNode true
-
                 }
             }
+
             steps {
                 sh '''
-                   rm -rf node_modules
+                    rm -rf node_modules
 
-                   export NPM_CONFIG_CACHE=$WORKSPACE/.npm
-
-                   npm ci
-                   npm run build
+                    npm ci
+                    npm run build
                 '''
 
+                stash name: 'build-artifacts', includes: 'build/**'
+                stash name: 'node-modules', includes: 'node_modules/**'
             }
         }
+
         stage('Test') {
             parallel {
-                stage('unit tests'){
+
+                stage('Unit Tests') {
                     agent {
                         docker {
                             image 'node:18-alpine'
                             reuseNode true
                         }
                     }
+
                     steps {
+                        unstash 'node-modules'
+
                         sh '''
-                           #test -f build/index.html
-                           npm test
+                            npm test -- --watchAll=false
                         '''
                     }
+
                     post {
-                        always{
-                            junit 'jest-results/junit.xml'
+                        always {
+                            junit allowEmptyResults: true,
+                                  testResults: 'jest-results/junit.xml'
                         }
                     }
-
-
                 }
-                stage('E2E') {
+
+                stage('E2E Tests') {
                     agent {
                         docker {
                             image 'mcr.microsoft.com/playwright:v1.39.0-jammy'
                             reuseNode true
                         }
                     }
+
                     steps {
+                        unstash 'build-artifacts'
+                        unstash 'node-modules'
+
                         sh '''
-                           npm install serve
-                           node_modules/.bin/serve -s build &
-                           sleep 10
-                           npx playwright test --reporter=html
+                            npm install serve
+
+                            npx serve -s build -l 3000 &
+                            SERVER_PID=$!
+
+                            sleep 10
+
+                            npx playwright test --reporter=html
+
+                            kill $SERVER_PID
                         '''
                     }
-                    post{
+
+                    post {
                         always {
-                            publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, icon: '', keepAll: false, reportDir: 'playwright-report', reportFiles: 'index.html', reportName: 'play wright HTML Report', reportTitles: '', useWrapperFileDirectly: true])
+                            publishHTML([
+                                allowMissing: true,
+                                alwaysLinkToLastBuild: true,
+                                keepAll: true,
+                                reportDir: 'playwright-report',
+                                reportFiles: 'index.html',
+                                reportName: 'Playwright HTML Report'
+                            ])
                         }
                     }
                 }
-                
             }
-
         }
-        stage('deploy') {
+
+        stage('Deploy') {
             agent {
                 docker {
                     image 'node:18-alpine'
-                    reuseNode true 
-                        
+                    reuseNode true
                 }
-                                    
             }
+
             steps {
+                unstash 'build-artifacts'
+
                 sh '''
-                   npm install netlify-cli
-                   netlify --version
+                    npm install netlify-cli
+
+                    netlify --version
+
+                    # Example deployment command
+                    # netlify deploy --prod --dir=build
                 '''
             }
         }
+    }
 
+    post {
+        always {
+            cleanWs()
+        }
 
+        success {
+            echo 'Pipeline completed successfully.'
+        }
+
+        failure {
+            echo 'Pipeline failed.'
+        }
     }
 }
