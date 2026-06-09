@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    environment {
+        NETLIFY_SITE_ID = '25649769-4219-4f13-a71c-31ea850e0d7b'
+    }
+
     stages {
 
         stage('Build') {
@@ -13,23 +17,20 @@ pipeline {
 
             steps {
                 sh '''
-                    export NPM_CONFIG_CACHE=$WORKSPACE/.npm
-
-                    rm -rf node_modules
-
+                    ls -la
+                    node --version
+                    npm --version
                     npm ci
                     npm run build
+                    ls -la
                 '''
-
-                stash name: 'build-artifacts', includes: 'build/**'
-                stash name: 'node-modules', includes: 'node_modules/**'
             }
         }
 
-        stage('Test') {
+        stage('Tests') {
             parallel {
 
-                stage('Unit Tests') {
+                stage('Unit tests') {
                     agent {
                         docker {
                             image 'node:18-alpine'
@@ -38,26 +39,20 @@ pipeline {
                     }
 
                     steps {
-                        unstash 'node-modules'
-
                         sh '''
-                            export NPM_CONFIG_CACHE=$WORKSPACE/.npm
-
-                            npm test -- --watchAll=false
+                            #test -f build/index.html
+                            npm test
                         '''
                     }
 
                     post {
                         always {
-                            junit(
-                                allowEmptyResults: true,
-                                testResults: 'jest-results/junit.xml'
-                            )
+                            junit 'jest-results/junit.xml'
                         }
                     }
                 }
 
-                stage('E2E Tests') {
+                stage('E2E') {
                     agent {
                         docker {
                             image 'mcr.microsoft.com/playwright:v1.39.0-jammy'
@@ -66,35 +61,17 @@ pipeline {
                     }
 
                     steps {
-                        unstash 'build-artifacts'
-                        unstash 'node-modules'
-
                         sh '''
-                            export NPM_CONFIG_CACHE=$WORKSPACE/.npm
-
                             npm install serve
-
-                            npx serve -s build -l 3000 &
-                            SERVER_PID=$!
-
+                            node_modules/.bin/serve -s build &
                             sleep 10
-
                             npx playwright test --reporter=html
-
-                            kill $SERVER_PID || true
                         '''
                     }
 
                     post {
                         always {
-                            publishHTML([
-                                allowMissing: true,
-                                alwaysLinkToLastBuild: true,
-                                keepAll: true,
-                                reportDir: 'playwright-report',
-                                reportFiles: 'index.html',
-                                reportName: 'Playwright HTML Report'
-                            ])
+                            publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, icon: '', keepAll: false, reportDir: '', reportFiles: 'index.html', reportName: 'Playwright Html Report', reportTitles: '', useWrapperFileDirectly: true])
                         }
                     }
                 }
@@ -110,37 +87,11 @@ pipeline {
             }
 
             steps {
-                unstash 'build-artifacts'
-
                 sh '''
-                    export NPM_CONFIG_CACHE=$WORKSPACE/.npm
-
-                    mkdir -p $NPM_CONFIG_CACHE
-
-                    npx netlify-cli --version
-
-                    # Example deployment:
-                    # npx netlify-cli deploy \
-                    #   --dir=build \
-                    #   --prod \
-                    #   --auth=$NETLIFY_AUTH_TOKEN \
-                    #   --site=$NETLIFY_SITE_ID
+                    npm install netlify-cli
+                    node_modules/.bin/netlify --version
                 '''
             }
-        }
-    }
-
-    post {
-        always {
-            cleanWs()
-        }
-
-        success {
-            echo 'Pipeline completed successfully.'
-        }
-
-        failure {
-            echo 'Pipeline failed.'
         }
     }
 }
